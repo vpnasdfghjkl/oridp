@@ -136,6 +136,8 @@ def main():
                 'timestamps': (2, ),
             }
             '''
+            
+            
             print("Warming up policy inference")
             latency = 0
             current_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())

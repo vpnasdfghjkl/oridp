@@ -7,8 +7,7 @@ import torch
 import dill
 import hydra
 from omegaconf import OmegaConf
-import scipy.spatial.transform as st
-from diffusion_policy.real_world.real_env_kuavo_Task7_SuZhou import KuavoEnv
+from LeRobot_KuavoEnv import KuavoEnv
 from diffusion_policy.real_world.real_inference_util import (
     get_real_obs_resolution, 
     get_real_obs_dict)
@@ -17,19 +16,14 @@ from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 
 import rospy
-input="/home/leju-ali/hx/kuavo/Task8-SuZhou/data/outputs/2025.02.23/19.42.10_train_diffusion_unet_image_Kuavo_Task8_SuZhou_task/checkpoints/latest.ckpt"
-output="/home/leju-ali/hx/kuavo/Task8-SuZhou/data/outputs/2025.02.23/19.42.10_train_diffusion_unet_image_Kuavo_Task8_SuZhou_task/checkpoints/output"
+input="/home/leju-ali/hx/oridp/ckpt/epoch=0060-train_loss=0.011.ckpt"
 
-vis_camera_idx=1
-steps_per_inference=6
-frequency=15
-command_latency=0.01
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
-
+print("cuda",torch.cuda.is_available())
+time.sleep(5)
 def main():
     # load checkpoint
-    steps_per_inference=6
     ckpt_path = input
     payload = torch.load(open(ckpt_path, 'rb'), pickle_module=dill)
     cfg = payload['cfg']
@@ -39,8 +33,6 @@ def main():
     workspace.load_payload(payload, exclude_keys=None, include_keys=None)
 
     # hacks for method-specific setup.
-    action_offset = 0
-    delta_action = False
     if 'diffusion' in cfg.name:
         # diffusion model
         policy: BaseImagePolicy
@@ -58,11 +50,8 @@ def main():
         raise RuntimeError("Unsupported policy type: ", cfg.name)
 
     # setup experiment
-    dt = 1/frequency
     n_obs_steps = cfg.n_obs_steps
     print("n_obs_steps: ", n_obs_steps)
-    print("steps_per_inference:", steps_per_inference)
-    print("action_offset:", action_offset)
 
     rospy.init_node("test")
     with KuavoEnv(
@@ -70,26 +59,33 @@ def main():
         n_obs_steps=2,
         video_capture_fps=30,
         robot_publish_rate=500,
-
         img_buffer_size=30,
-        robot_state_buffer_size=500,
-
+        robot_state_buffer_size=100,
         video_capture_resolution=(640, 480),
-
-        
         ) as env:
+            is_just_img = False
+            ## ========= prepare obs ==========
             print("waiting for the obs buffer to be ready ......")
-
-            env.obs_buffer.wait_buffer_ready()
-            obs, camera_obs, camera_obs_timestamps, robot_obs, robot_obs_timestamps = env.get_obs()
-            print('##################################################################')
-            print(f"{camera_obs_timestamps['img01'][0]:.10f}, {camera_obs_timestamps['img01'][1]:.10f}, \n"
-                f"{camera_obs_timestamps['img02'][0]:.10f}, {camera_obs_timestamps['img02'][1]:.10f}, \n"
-                f"{robot_obs_timestamps['ROBOT_state_joint'][0]:.10f}, {robot_obs_timestamps['ROBOT_state_joint'][1]:.10f}, \n"
-                f"{robot_obs_timestamps['ROBOT_state_gripper'][0]:.10f}, {robot_obs_timestamps['ROBOT_state_gripper'][1]:.10f}\n")
-            print('##################################################################')
-            for k, v in obs.items():
-               print(f'{k=}, \t {v.shape=}')
+            import threading, signal, sys
+            env.obs_buffer.wait_buffer_ready(is_just_img)
+            print("Warming up policy inference")
+            latency = 0
+            current_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
+            output_video_path = f'./{cfg.task.name}_{current_time}_speedx1_latency{latency}ms.mp4'
+            stop_event = threading.Event()  
+            record_title = f"Latency of [Obs_trans, PredictRet_trans, Motor] =[{latency}ms, {latency}ms, {latency}ms]"
+            video_thread = threading.Thread(target=env.record_video, args=(output_video_path, 640, 480, 30, True,stop_event,record_title))
+            video_thread.start()
+            
+            def handle_exit_signal(signum, frame, stop_event):
+                print("Signal received, saving video and cleaning up...")
+                stop_event.set()  # 停止视频录制
+                cv2.destroyAllWindows()  # 关闭所有OpenCV窗口
+                sys.exit(0)  # 退出程序
+                
+            # 注册信号处理器
+            signal.signal(signal.SIGINT, lambda sig, frame: handle_exit_signal(sig, frame, stop_event))
+            signal.signal(signal.SIGQUIT, lambda sig, frame: handle_exit_signal(sig, frame, stop_event))
             
             while True:
                 # ========= human control loop ==========
@@ -99,28 +95,66 @@ def main():
                 try:
                     # start episode
                     policy.reset()
+                    import matplotlib.pyplot as plt
+
+                    
+                    import imageio
+                    current_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
+                    output_video_path = f'./{cfg.task.name}_{current_time}_speedx_latency{latency}ms.mp4'
+                    writer = imageio.get_writer(output_video_path, fps=10, codec="libx264")
                     while True:
                         # =============
                         # get obs
                         # =============
-                        
-                        obs, camera_obs, camera_obs_timestamps, robot_obs, robot_obs_timestamps = env.get_obs()
+                        obs, camera_obs, camera_obs_timestamps, robot_obs, robot_obs_timestamps = env.get_obs(is_just_img)
                         print('##################################################################')
                         print(f"{camera_obs_timestamps['img01'][0]:.10f}, {camera_obs_timestamps['img01'][1]:.10f}, \n"
                             f"{camera_obs_timestamps['img02'][0]:.10f}, {camera_obs_timestamps['img02'][1]:.10f}, \n"
-                            f"{robot_obs_timestamps['ROBOT_state_joint'][0]:.10f}, {robot_obs_timestamps['ROBOT_state_joint'][1]:.10f}, \n"
-                            f"{robot_obs_timestamps['ROBOT_state_gripper'][0]:.10f}, {robot_obs_timestamps['ROBOT_state_gripper'][1]:.10f}\n")
+                        )
+                        if not is_just_img:
+                            print(f"{robot_obs_timestamps['ROBOT_state_joint'][0]:.10f}, {robot_obs_timestamps['ROBOT_state_joint'][1]:.10f}, \n"
+                                f"{robot_obs_timestamps['ROBOT_state_gripper'][0]:.10f}, {robot_obs_timestamps['ROBOT_state_gripper'][1]:.10f}\n"
+                                )
                         print('##################################################################')
+                        import numpy as np
+                        # create fake obs
+                        
                         # =============
                         # show sense img
                         # =============
+                        from PIL import Image, ImageDraw, ImageFont
+                        # show sense img
+                        Image.fromarray(obs['img01'][0].astype(np.uint8)).save("saved_image_pillow.png")
+
                         imgs = []
                         for k, v in obs.items():
                             if "img" in k:
                                 img = obs[k][-1]
-                                img = cv2.resize(img, (480, 640))
+                                img = cv2.resize(img, (640, 480))
                                 img01_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                                 imgs.append(img01_bgr)
+                                
+                        concatenated_img = np.hstack(imgs)  # 横向拼接图像
+                        cv2.imshow('Image Stream', concatenated_img)
+                        
+                        from PIL import Image, ImageDraw, ImageFont
+                        concatenated_img = cv2.cvtColor(concatenated_img, cv2.COLOR_BGR2RGB)
+                        pil_img = Image.fromarray(concatenated_img)
+                        draw = ImageDraw.Draw(pil_img)
+                        font = ImageFont.load_default()  # 使用默认字体，可以选择其他字体
+                        title = record_title
+                        draw.text((50, 50), title, font=font, fill="green")
+                        
+                        # 转回Numpy数组
+                        concatenated_img_with_text = np.array(pil_img)
+                        
+                        # 写入视频
+                        writer.append_data(concatenated_img_with_text)
+                        
+
+                        # 处理按键事件，按'q'退出
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            break
                         
                         # run inference
                         with torch.no_grad():
@@ -139,12 +173,13 @@ def main():
            
 
                         # execute actions
-                        numpy_action = action.to("cpu").numpy()
+                        
                         env.exec_actions(
-                            actions=numpy_action[::2,:],
+                            actions=action[:13,:],
                         )
+                        # time.sleep(0.8)
                         print(f"Submitted {len(action)} steps of actions.")
-  
+
                 except KeyboardInterrupt:
                     print("Interrupted!")
                     env.close()
