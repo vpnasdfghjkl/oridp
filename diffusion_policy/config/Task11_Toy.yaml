@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: Kuavo_Task9-SuZhou_task
+  - task: Task11_Toy
 name: train_diffusion_unet_image
 _target_: diffusion_policy.workspace.train_diffusion_unet_image_workspace.TrainDiffusionUnetImageWorkspace
 
@@ -73,7 +73,7 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 4
+  batch_size: 16
   num_workers: 8
   shuffle: True
   pin_memory: True
