@@ -35,7 +35,7 @@ def timer_callback(event):
         rospy.loginfo(f"Republished the last message: {new_msg}")
     active = False  # 置为非活跃状态，等待新的消息到来
 
-# 创建定时器，每 2ms 触发一次
+# 创建定时器，每 10ms 触发一次
 timer = rospy.Timer(rospy.Duration(0.01), timer_callback)
 
 # 关闭回调

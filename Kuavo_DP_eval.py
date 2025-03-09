@@ -7,7 +7,7 @@ import torch
 import dill
 import hydra
 from omegaconf import OmegaConf
-from LeRobot_KuavoEnv import KuavoEnv
+from KuavoEnv import KuavoEnv
 from diffusion_policy.real_world.real_inference_util import (
     get_real_obs_resolution, 
     get_real_obs_dict)
@@ -17,7 +17,7 @@ from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 
 import rospy
 input="/home/leju-ali/hx/oridp/ckpt/epoch=0060-train_loss=0.011.ckpt"
-
+# input = '/home/leju-ali/hx/oridp/ckpt/epoch=0100-train_loss=0.006.ckpt'
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 print("cuda",torch.cuda.is_available())
